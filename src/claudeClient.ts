@@ -50,7 +50,9 @@ function parseMacrosResponse(text: string): Macros {
     throw new Error("No JSON object found in response");
   }
 
-  const parsed: unknown = JSON.parse(jsonMatch[0]);
+  // Handle unquoted keys (JavaScript object notation) by adding quotes
+  const fixed = jsonMatch[0].replace(/(\{|,)\s*([a-zA-Z_]\w*)\s*:/g, '$1"$2":');
+  const parsed: unknown = JSON.parse(fixed);
 
   if (
     typeof parsed !== "object" ||
