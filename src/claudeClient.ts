@@ -3,10 +3,29 @@ import { Macros } from "./types";
 
 const client = new Anthropic();
 
-const SYSTEM_PROMPT =
+const KNOWN_PRODUCTS = [
+  "Nurri Protein Shake (11 fl oz can): 150 cal, 30g protein, 3g carbs, 2.5g fat, 1g fiber",
+].join("\n");
+
+const MACRO_SYSTEM_PROMPT =
   "You are a nutrition expert. Estimate macros for the described meal. " +
+  "ALWAYS provide your best estimate — never ask clarifying questions. " +
+  "If you don't recognize a brand, estimate based on similar products in that category. " +
+  "If a photo contains a nutrition label, read it VERY carefully — pay close attention to every number, " +
+  "especially protein, and double-check your reading against the label before responding. " +
+  "Known products (use these exact values when matched):\n" + KNOWN_PRODUCTS + "\n" +
   "Return ONLY valid JSON matching {calories: number, protein_g: number, carbs_g: number, fat_g: number, fiber_g: number}. " +
   "No other text.";
+
+const CHAT_SYSTEM_PROMPT =
+  "You are a friendly nutrition expert and food coach. " +
+  "Help users with food recommendations, nutrition advice, meal planning, and general health questions. " +
+  "Keep responses concise (under 300 words) and practical. " +
+  "If the user describes a specific meal or food item they consumed (even if unfamiliar to you), " +
+  "ALWAYS provide your best macro estimate as ONLY a JSON object: " +
+  "{calories: number, protein_g: number, carbs_g: number, fat_g: number, fiber_g: number}. " +
+  "Never ask follow-up questions about a food — just estimate based on the category. " +
+  "Only respond conversationally if the user is clearly asking a question or seeking advice, not logging food.";
 
 const MODEL = "claude-sonnet-4-20250514";
 const MAX_TEXT_LENGTH = 2000;
@@ -74,7 +93,7 @@ export async function estimateMacros(
       type: "text",
       text: text
         ? text.slice(0, MAX_TEXT_LENGTH)
-        : "Estimate the macros for this meal.",
+        : "Estimate the macros for this food. If this is a nutrition label, read every value carefully and use the exact numbers shown on the label.",
     });
   } else if (text) {
     if (text.trim().length === 0) {
@@ -88,7 +107,7 @@ export async function estimateMacros(
     response = await client.messages.create({
       model: MODEL,
       max_tokens: 256,
-      system: SYSTEM_PROMPT,
+      system: MACRO_SYSTEM_PROMPT,
       messages: [{ role: "user", content }],
     });
   } catch {
@@ -101,4 +120,44 @@ export async function estimateMacros(
   }
 
   return parseMacrosResponse(block.text);
+}
+
+export type ChatResult =
+  | { type: "macros"; macros: Macros }
+  | { type: "chat"; message: string };
+
+export async function chat(text: string): Promise<ChatResult> {
+  if (!text || text.trim().length === 0) {
+    throw new Error("Text input must not be empty");
+  }
+
+  let response: Anthropic.Message;
+  try {
+    response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system: CHAT_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: text.slice(0, MAX_TEXT_LENGTH) }],
+    });
+  } catch {
+    throw new Error("Failed to get response from API");
+  }
+
+  const block = response.content.find((b) => b.type === "text");
+  if (!block || block.type !== "text") {
+    throw new Error("No text content in API response");
+  }
+
+  // Check if Claude returned macros JSON (meaning user described a meal)
+  const jsonMatch = block.text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const macros = parseMacrosResponse(block.text);
+      return { type: "macros", macros };
+    } catch {
+      // Not valid macros JSON — treat as chat response
+    }
+  }
+
+  return { type: "chat", message: block.text };
 }

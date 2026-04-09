@@ -1,13 +1,13 @@
 import 'dotenv/config';
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
-import { estimateMacros } from './claudeClient';
+import { estimateMacros, chat } from './claudeClient';
 import { logMeal, getTodayTotals, getWeekTotals } from './sheetsClient';
 import { Macros } from './types';
 
 const MAX_TEXT_LENGTH = 500;
 const MAX_PHOTO_SIZE = 5 * 1024 * 1024; // 5MB
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
@@ -33,8 +33,8 @@ function formatMacros(m: Macros): string {
 bot.command('start', async (ctx) => {
   await ctx.reply(
     'Welcome to MacroBot!\n\n' +
-      'Send me a meal description or a photo of your food, ' +
-      "and I'll estimate the macros and log them for you.\n\n" +
+      'Send me a meal description or photo to log macros.\n' +
+      'You can also chat with me about nutrition, food recommendations, and meal planning!\n\n' +
       'Commands:\n' +
       "/today - See today's totals\n" +
       "/week - See this week's summary",
@@ -70,11 +70,16 @@ bot.on('text', async (ctx) => {
   }
 
   try {
-    const macros = await estimateMacros(text);
-    await logMeal(text, macros);
-    await ctx.reply(`Logged!\n\n${formatMacros(macros)}`);
-  } catch {
-    await ctx.reply('Something went wrong estimating your meal. Please try again.');
+    const result = await chat(text);
+    if (result.type === 'macros') {
+      await logMeal(text, result.macros);
+      await ctx.reply(`Logged!\n\n${formatMacros(result.macros)}`);
+    } else {
+      await ctx.reply(result.message);
+    }
+  } catch (err) {
+    console.error('Chat error:', err);
+    await ctx.reply('Something went wrong. Please try again.');
   }
 });
 
@@ -94,11 +99,8 @@ bot.on('photo', async (ctx) => {
       responseType: 'arraybuffer',
     });
 
-    const contentType = String(response.headers['content-type'] ?? '');
-    if (!ALLOWED_MIME_TYPES.includes(contentType)) {
-      await ctx.reply('Unsupported image format. Please send a JPEG or PNG.');
-      return;
-    }
+    const rawContentType = String(response.headers['content-type'] ?? '').split(';')[0].trim();
+    const contentType = ALLOWED_MIME_TYPES.includes(rawContentType) ? rawContentType : 'image/jpeg';
 
     const buffer = Buffer.from(response.data);
     if (buffer.length > MAX_PHOTO_SIZE) {

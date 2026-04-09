@@ -12,9 +12,21 @@ function getSheetId(): string {
   return id;
 }
 
-const auth = new google.auth.GoogleAuth({
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-});
+function buildAuth(): InstanceType<typeof google.auth.GoogleAuth> {
+  const base64Creds = process.env.GOOGLE_CREDENTIALS_BASE64;
+  if (base64Creds) {
+    const credentials = JSON.parse(Buffer.from(base64Creds, "base64").toString("utf-8"));
+    return new google.auth.GoogleAuth({
+      credentials,
+      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+    });
+  }
+  return new google.auth.GoogleAuth({
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+}
+
+const auth = buildAuth();
 
 const sheets = google.sheets({ version: "v4", auth });
 
@@ -42,8 +54,16 @@ function validateMacros(macros: Macros): void {
   }
 }
 
-function todayUTC(): string {
-  return new Date().toISOString().slice(0, 10);
+const TZ = "America/New_York";
+
+function todayEST(): string {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(now);
+  return parts; // "YYYY-MM-DD"
+}
+
+function nowEST(): string {
+  return new Date().toLocaleString("en-US", { timeZone: TZ });
 }
 
 function parseRow(row: string[]): { date: string; macros: Macros } | null {
@@ -60,8 +80,19 @@ function parseRow(row: string[]): { date: string; macros: Macros } | null {
   ) {
     return null;
   }
+  // Parse date from "M/D/YYYY, H:MM:SS AM/PM" (en-US) format
+  const datePart = row[0].split(",")[0]; // "M/D/YYYY"
+  const dateMatch = datePart.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  let dateStr: string;
+  if (dateMatch) {
+    const [, m, d, y] = dateMatch;
+    dateStr = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  } else {
+    // Fallback: try ISO format (legacy rows)
+    dateStr = row[0].slice(0, 10);
+  }
   return {
-    date: row[0].slice(0, 10),
+    date: dateStr,
     macros: { calories, protein_g, carbs_g, fat_g, fiber_g },
   };
 }
@@ -110,7 +141,7 @@ export async function logMeal(
 
   const spreadsheetId = getSheetId();
   const row = [
-    new Date().toISOString(),
+    nowEST(),
     sanitize(description.trim()),
     macros.calories,
     macros.protein_g,
@@ -135,7 +166,7 @@ export async function logMeal(
 
 export async function getTodayTotals(): Promise<Macros> {
   const rows = await fetchAllRows();
-  const today = todayUTC();
+  const today = todayEST();
   const todayMacros: Macros[] = [];
 
   for (const row of rows) {
@@ -150,10 +181,10 @@ export async function getTodayTotals(): Promise<Macros> {
 
 export async function getWeekTotals(): Promise<Macros> {
   const rows = await fetchAllRows();
-  const now = new Date();
-  const cutoff = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6)
-  );
+  const todayStr = todayEST();
+  const todayDate = new Date(todayStr + "T00:00:00");
+  const cutoff = new Date(todayDate);
+  cutoff.setDate(cutoff.getDate() - 6);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
   const weekMacros: Macros[] = [];
 
