@@ -5,6 +5,7 @@ const client = new Anthropic();
 
 const KNOWN_PRODUCTS = [
   "Nurri Protein Shake (11 fl oz can): 150 cal, 30g protein, 3g carbs, 2.5g fat, 1g fiber",
+  "Oikos Pro Yogurt 15g protein (5.3 oz cup): 100 cal, 15g protein, 7g carbs, 0g fat, 0g fiber",
 ].join("\n");
 
 const MACRO_SYSTEM_PROMPT =
