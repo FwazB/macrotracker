@@ -16,6 +16,30 @@ if (!token) {
 
 const bot = new Telegraf(token);
 
+// Parse allowed Telegram user IDs (fail closed if not set)
+const allowedIdsRaw = process.env.ALLOWED_TELEGRAM_IDS?.trim();
+if (!allowedIdsRaw) {
+  console.warn('WARNING: ALLOWED_TELEGRAM_IDS is not set — all users will be rejected.');
+}
+const allowedUserIds: Set<number> = new Set(
+  (allowedIdsRaw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map(Number)
+    .filter((n) => !Number.isNaN(n)),
+);
+
+// Auth middleware — must run before all handlers
+bot.use(async (ctx, next) => {
+  const userId = ctx.from?.id;
+  if (!userId || !allowedUserIds.has(userId)) {
+    await ctx.reply('Unauthorized.');
+    return;
+  }
+  return next();
+});
+
 function sanitizeText(input: string): string {
   return input.replace(/[^\P{Cc}\n]/gu, '').trim().slice(0, MAX_TEXT_LENGTH);
 }
@@ -113,9 +137,12 @@ bot.on('photo', async (ctx) => {
       ? sanitizeText(ctx.message.caption)
       : 'Food photo';
 
-    const macros = await estimateMacros(undefined, base64, contentType);
+    const { macros, description } = await estimateMacros(undefined, base64, contentType);
     await logMeal(caption, macros);
-    await ctx.reply(`Logged!\n\n${formatMacros(macros)}`);
+    const header = description
+      ? `${description}\n\nHere's the breakdown:\n\n`
+      : '';
+    await ctx.reply(`Logged!\n\n${header}${formatMacros(macros)}`);
   } catch {
     await ctx.reply('Something went wrong processing your photo. Please try again.');
   }
