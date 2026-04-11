@@ -15,7 +15,12 @@ function getSheetId(): string {
 function buildAuth(): InstanceType<typeof google.auth.GoogleAuth> {
   const base64Creds = process.env.GOOGLE_CREDENTIALS_BASE64;
   if (base64Creds) {
-    const credentials = JSON.parse(Buffer.from(base64Creds, "base64").toString("utf-8"));
+    let credentials: Record<string, unknown>;
+    try {
+      credentials = JSON.parse(Buffer.from(base64Creds, "base64").toString("utf-8"));
+    } catch {
+      throw new Error("GOOGLE_CREDENTIALS_BASE64 is not valid base64-encoded JSON");
+    }
     return new google.auth.GoogleAuth({
       credentials,
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],

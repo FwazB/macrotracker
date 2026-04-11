@@ -1,5 +1,10 @@
-.env
-credentials.json
 node_modules
+.env
+.env.*
+credentials.json
+*credentials*.json
+*.pem
+*.key
+*.p12
 dist
 .git
