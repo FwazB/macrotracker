@@ -188,14 +188,23 @@ export async function getWeekTotals(): Promise<Macros> {
   const rows = await fetchAllRows();
   const todayStr = todayEST();
   const todayDate = new Date(todayStr + "T00:00:00");
-  const cutoff = new Date(todayDate);
-  cutoff.setDate(cutoff.getDate() - 6);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  // Find Monday of the current week (Mon=start, Sun=end)
+  const day = todayDate.getDay(); // 0=Sun, 1=Mon, ...
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(todayDate);
+  monday.setDate(monday.getDate() - diffToMonday);
+  const mondayStr = monday.toISOString().slice(0, 10);
+
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const sundayStr = sunday.toISOString().slice(0, 10);
+
   const weekMacros: Macros[] = [];
 
   for (const row of rows) {
     const parsed = parseRow(row);
-    if (parsed && parsed.date >= cutoffStr) {
+    if (parsed && parsed.date >= mondayStr && parsed.date <= sundayStr) {
       weekMacros.push(parsed.macros);
     }
   }

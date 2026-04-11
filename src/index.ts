@@ -83,7 +83,7 @@ bot.command('today', async (ctx) => {
 bot.command('week', async (ctx) => {
   try {
     const totals = await getWeekTotals();
-    await ctx.reply(`This week's totals (last 7 days):\n\n${formatMacros(totals)}`);
+    await ctx.reply(`This week's totals (Mon–Sun):\n\n${formatMacros(totals)}`);
   } catch {
     await ctx.reply('Something went wrong fetching the weekly summary.');
   }
