@@ -3,7 +3,7 @@ import { Telegraf } from 'telegraf';
 import axios from 'axios';
 import { estimateMacros, chat } from './claudeClient';
 import { logMeal, getTodayTotals, getWeekTotals } from './sheetsClient';
-import { Macros } from './types';
+import { Macros, ItemBreakdown } from './types';
 
 const MAX_TEXT_LENGTH = 500;
 const MAX_PHOTO_SIZE = 5 * 1024 * 1024; // 5MB
@@ -54,6 +54,12 @@ function formatMacros(m: Macros): string {
   ].join('\n');
 }
 
+function formatBreakdown(items: ItemBreakdown[]): string {
+  return items
+    .map((item) => `${item.name}\n  ${item.calories} cal | ${item.protein_g}g P | ${item.carbs_g}g C | ${item.fat_g}g F`)
+    .join('\n\n');
+}
+
 bot.command('start', async (ctx) => {
   await ctx.reply(
     'Welcome to MacroBot!\n\n' +
@@ -97,7 +103,11 @@ bot.on('text', async (ctx) => {
     const result = await chat(text);
     if (result.type === 'macros') {
       await logMeal(text, result.macros);
-      await ctx.reply(`Logged!\n\n${formatMacros(result.macros)}`);
+      if (result.items && result.items.length > 1) {
+        await ctx.reply(`Logged!\n\n${formatBreakdown(result.items)}\n\nTotal:\n${formatMacros(result.macros)}`);
+      } else {
+        await ctx.reply(`Logged!\n\n${formatMacros(result.macros)}`);
+      }
     } else {
       await ctx.reply(result.message);
     }
@@ -137,12 +147,14 @@ bot.on('photo', async (ctx) => {
       ? sanitizeText(ctx.message.caption)
       : 'Food photo';
 
-    const { macros, description } = await estimateMacros(undefined, base64, contentType);
+    const { macros, items, description } = await estimateMacros(undefined, base64, contentType);
     await logMeal(caption, macros);
-    const header = description
-      ? `${description}\n\nHere's the breakdown:\n\n`
-      : '';
-    await ctx.reply(`Logged!\n\n${header}${formatMacros(macros)}`);
+    const desc = description ? `${description}\n\n` : '';
+    if (items && items.length > 1) {
+      await ctx.reply(`${desc}Logged!\n\n${formatBreakdown(items)}\n\nTotal:\n${formatMacros(macros)}`);
+    } else {
+      await ctx.reply(`${desc}Logged!\n\n${formatMacros(macros)}`);
+    }
   } catch {
     await ctx.reply('Something went wrong processing your photo. Please try again.');
   }
