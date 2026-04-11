@@ -160,8 +160,11 @@ bot.on('photo', async (ctx) => {
   }
 });
 
-bot.launch().then(async () => {
-  console.log('Bot started');
+bot.launch();
+console.log('Bot started');
+
+// Send startup notification independently (bot.telegram.sendMessage uses HTTP, doesn't need polling)
+(async () => {
   try {
     console.log('Fetching today totals for startup notification...');
     const totals = await getTodayTotals();
@@ -177,7 +180,7 @@ bot.launch().then(async () => {
   } catch (err) {
     console.error('Startup notification error:', err);
   }
-});
+})();
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
