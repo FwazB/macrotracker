@@ -163,13 +163,19 @@ bot.on('photo', async (ctx) => {
 bot.launch().then(async () => {
   console.log('Bot started');
   try {
+    console.log('Fetching today totals for startup notification...');
     const totals = await getTodayTotals();
+    console.log('Today totals:', JSON.stringify(totals));
     const message = `Bot restarted — here's today so far:\n\n${formatMacros(totals)}`;
     for (const userId of allowedUserIds) {
-      await bot.telegram.sendMessage(userId, message).catch(() => {});
+      console.log(`Sending startup notification to ${userId}...`);
+      await bot.telegram.sendMessage(userId, message).catch((err) => {
+        console.error(`Failed to send startup notification to ${userId}:`, err);
+      });
     }
-  } catch {
-    // Don't crash on startup notification failure
+    console.log('Startup notifications sent');
+  } catch (err) {
+    console.error('Startup notification error:', err);
   }
 });
 
