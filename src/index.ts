@@ -160,7 +160,18 @@ bot.on('photo', async (ctx) => {
   }
 });
 
-bot.launch();
+bot.launch().then(async () => {
+  console.log('Bot started');
+  try {
+    const totals = await getTodayTotals();
+    const message = `Bot restarted — here's today so far:\n\n${formatMacros(totals)}`;
+    for (const userId of allowedUserIds) {
+      await bot.telegram.sendMessage(userId, message).catch(() => {});
+    }
+  } catch {
+    // Don't crash on startup notification failure
+  }
+});
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
