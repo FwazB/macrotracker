@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import axios from 'axios';
 import { estimateMacros, chat } from './claudeClient';
 import { logMeal, getTodayTotals, getWeekTotals } from './sheetsClient';
@@ -60,6 +60,29 @@ function formatBreakdown(items: ItemBreakdown[]): string {
     .join('\n\n');
 }
 
+function formatMacrosSummary(m: Macros): string {
+  return `${m.calories} cal | ${m.protein_g}g P | ${m.carbs_g}g C | ${m.fat_g}g F | ${m.fiber_g}g Fi`;
+}
+
+interface BreakdownEntry {
+  items: ItemBreakdown[];
+  macros: Macros;
+  prefix: string;
+}
+
+const breakdownStore = new Map<string, BreakdownEntry>();
+const MAX_BREAKDOWN_ENTRIES = 200;
+
+function storeBreakdown(items: ItemBreakdown[], macros: Macros, prefix: string): string {
+  const id = Math.random().toString(36).slice(2, 10);
+  if (breakdownStore.size >= MAX_BREAKDOWN_ENTRIES) {
+    const firstKey = breakdownStore.keys().next().value;
+    if (firstKey) breakdownStore.delete(firstKey);
+  }
+  breakdownStore.set(id, { items, macros, prefix });
+  return id;
+}
+
 bot.command('start', async (ctx) => {
   await ctx.reply(
     'Welcome to MacroBot!\n\n' +
@@ -89,6 +112,34 @@ bot.command('week', async (ctx) => {
   }
 });
 
+bot.action(/^bd_show:(.+)$/, async (ctx) => {
+  const id = ctx.match[1];
+  const entry = breakdownStore.get(id);
+  if (!entry) {
+    await ctx.answerCbQuery('Breakdown expired');
+    return;
+  }
+  const text = `${entry.prefix}Logged!\n\n${formatBreakdown(entry.items)}\n\nTotal:\n${formatMacros(entry.macros)}`;
+  await ctx.editMessageText(text, Markup.inlineKeyboard([
+    Markup.button.callback('🔼 Hide breakdown', `bd_hide:${id}`),
+  ]));
+  await ctx.answerCbQuery();
+});
+
+bot.action(/^bd_hide:(.+)$/, async (ctx) => {
+  const id = ctx.match[1];
+  const entry = breakdownStore.get(id);
+  if (!entry) {
+    await ctx.answerCbQuery('Breakdown expired');
+    return;
+  }
+  const text = `${entry.prefix}Logged! ${formatMacrosSummary(entry.macros)}`;
+  await ctx.editMessageText(text, Markup.inlineKeyboard([
+    Markup.button.callback('📊 Show breakdown', `bd_show:${id}`),
+  ]));
+  await ctx.answerCbQuery();
+});
+
 bot.on('text', async (ctx) => {
   const raw = ctx.message.text;
   if (raw.startsWith('/')) return;
@@ -102,9 +153,13 @@ bot.on('text', async (ctx) => {
   try {
     const result = await chat(text);
     if (result.type === 'macros') {
-      await logMeal(text, result.macros);
+      await logMeal(text, result.macros, result.items);
       if (result.items && result.items.length > 1) {
-        await ctx.reply(`Logged!\n\n${formatBreakdown(result.items)}\n\nTotal:\n${formatMacros(result.macros)}`);
+        const id = storeBreakdown(result.items, result.macros, '');
+        await ctx.reply(
+          `Logged! ${formatMacrosSummary(result.macros)}`,
+          Markup.inlineKeyboard([Markup.button.callback('📊 Show breakdown', `bd_show:${id}`)]),
+        );
       } else {
         await ctx.reply(`Logged!\n\n${formatMacros(result.macros)}`);
       }
@@ -148,12 +203,16 @@ bot.on('photo', async (ctx) => {
       : 'Food photo';
 
     const { macros, items, description } = await estimateMacros(undefined, base64, contentType);
-    await logMeal(caption, macros);
-    const desc = description ? `${description}\n\n` : '';
+    await logMeal(caption, macros, items);
+    const prefix = description ? `${description}\n\n` : '';
     if (items && items.length > 1) {
-      await ctx.reply(`${desc}Logged!\n\n${formatBreakdown(items)}\n\nTotal:\n${formatMacros(macros)}`);
+      const id = storeBreakdown(items, macros, prefix);
+      await ctx.reply(
+        `${prefix}Logged! ${formatMacrosSummary(macros)}`,
+        Markup.inlineKeyboard([Markup.button.callback('📊 Show breakdown', `bd_show:${id}`)]),
+      );
     } else {
-      await ctx.reply(`${desc}Logged!\n\n${formatMacros(macros)}`);
+      await ctx.reply(`${prefix}Logged!\n\n${formatMacros(macros)}`);
     }
   } catch {
     await ctx.reply('Something went wrong processing your photo. Please try again.');

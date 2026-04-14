@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { Macros } from "./types";
+import { Macros, ItemBreakdown } from "./types";
 
 const SHEET_NAME = "Meals";
 const RANGE = `${SHEET_NAME}!A:G`;
@@ -120,6 +120,10 @@ function sumMacros(items: Macros[]): Macros {
   return totals;
 }
 
+function isSubRow(row: string[]): boolean {
+  return row.length >= 2 && row[1].trimStart().startsWith("→");
+}
+
 async function fetchAllRows(): Promise<string[][]> {
   const spreadsheetId = getSheetId();
   try {
@@ -137,7 +141,8 @@ async function fetchAllRows(): Promise<string[][]> {
 
 export async function logMeal(
   description: string,
-  macros: Macros
+  macros: Macros,
+  items?: ItemBreakdown[]
 ): Promise<void> {
   if (typeof description !== "string" || description.trim().length === 0) {
     throw new Error("Meal description must be a non-empty string");
@@ -145,22 +150,38 @@ export async function logMeal(
   validateMacros(macros);
 
   const spreadsheetId = getSheetId();
-  const row = [
-    nowEST(),
-    sanitize(description.trim()),
-    macros.calories,
-    macros.protein_g,
-    macros.carbs_g,
-    macros.fat_g,
-    macros.fiber_g,
+  const rows: (string | number)[][] = [
+    [
+      nowEST(),
+      sanitize(description.trim()),
+      macros.calories,
+      macros.protein_g,
+      macros.carbs_g,
+      macros.fat_g,
+      macros.fiber_g,
+    ],
   ];
+
+  if (items && items.length > 1) {
+    for (const item of items) {
+      rows.push([
+        "",
+        sanitize(`→ ${item.name}`),
+        item.calories,
+        item.protein_g,
+        item.carbs_g,
+        item.fat_g,
+        item.fiber_g,
+      ]);
+    }
+  }
 
   try {
     await sheets.spreadsheets.values.append({
       spreadsheetId,
       range: RANGE,
       valueInputOption: "RAW",
-      requestBody: { values: [row] },
+      requestBody: { values: rows },
     });
   } catch (err: unknown) {
     const message =
@@ -175,6 +196,7 @@ export async function getTodayTotals(): Promise<Macros> {
   const todayMacros: Macros[] = [];
 
   for (const row of rows) {
+    if (isSubRow(row)) continue;
     const parsed = parseRow(row);
     if (parsed && parsed.date === today) {
       todayMacros.push(parsed.macros);
@@ -203,6 +225,7 @@ export async function getWeekTotals(): Promise<Macros> {
   const weekMacros: Macros[] = [];
 
   for (const row of rows) {
+    if (isSubRow(row)) continue;
     const parsed = parseRow(row);
     if (parsed && parsed.date >= mondayStr && parsed.date <= sundayStr) {
       weekMacros.push(parsed.macros);
