@@ -2,10 +2,10 @@ import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
 import axios from 'axios';
 import { estimateMacros, chat } from './claudeClient';
-import { logMeal, getTodayTotals, getWeekTotals } from './mealsRepo';
+import { logMeal, getTodayTotals, getWeekTotals, deleteMeal, getLatestMeal, getRecentMeals } from './mealsRepo';
 import { Macros, ItemBreakdown } from './types';
 import { runMigrations } from './db/migrate';
-import { seedOwner } from './db/seed-owner';
+import { seedOwner, getOwnerUserId } from './db/seed-owner';
 
 const MAX_TEXT_LENGTH = 500;
 const MAX_PHOTO_SIZE = 5 * 1024 * 1024; // 5MB
@@ -70,19 +70,32 @@ interface BreakdownEntry {
   items: ItemBreakdown[];
   macros: Macros;
   prefix: string;
+  mealId: string;
 }
 
 const breakdownStore = new Map<string, BreakdownEntry>();
 const MAX_BREAKDOWN_ENTRIES = 200;
 
-function storeBreakdown(items: ItemBreakdown[], macros: Macros, prefix: string): string {
+function storeBreakdown(items: ItemBreakdown[], macros: Macros, prefix: string, mealId: string): string {
   const id = Math.random().toString(36).slice(2, 10);
   if (breakdownStore.size >= MAX_BREAKDOWN_ENTRIES) {
     const firstKey = breakdownStore.keys().next().value;
     if (firstKey) breakdownStore.delete(firstKey);
   }
-  breakdownStore.set(id, { items, macros, prefix });
+  breakdownStore.set(id, { items, macros, prefix, mealId });
   return id;
+}
+
+function formatRecentTime(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(date);
+  const get = (t: string): string => parts.find((p) => p.type === t)?.value ?? '';
+  return `${get('month')}/${get('day')} ${get('hour')}:${get('minute')} ${get('dayPeriod')}`;
 }
 
 bot.command('start', async (ctx) => {
@@ -92,7 +105,9 @@ bot.command('start', async (ctx) => {
       'You can also chat with me about nutrition, food recommendations, and meal planning!\n\n' +
       'Commands:\n' +
       "/today - See today's totals\n" +
-      "/week - See this week's summary",
+      "/week - See this week's summary\n" +
+      '/recent - See your last 10 meals\n' +
+      '/undo - Remove your most recent meal',
   );
 });
 
@@ -122,9 +137,10 @@ bot.action(/^bd_show:(.+)$/, async (ctx) => {
     return;
   }
   const text = `${entry.prefix}Logged!\n\n${formatBreakdown(entry.items)}\n\nTotal:\n${formatMacros(entry.macros)}`;
-  await ctx.editMessageText(text, Markup.inlineKeyboard([
+  await ctx.editMessageText(text, Markup.inlineKeyboard([[
     Markup.button.callback('🔼 Hide breakdown', `bd_hide:${id}`),
-  ]));
+    Markup.button.callback('🗑️ Delete', `del_ask:${entry.mealId}`),
+  ]]));
   await ctx.answerCbQuery();
 });
 
@@ -136,10 +152,97 @@ bot.action(/^bd_hide:(.+)$/, async (ctx) => {
     return;
   }
   const text = `${entry.prefix}Logged! ${formatMacrosSummary(entry.macros)}`;
-  await ctx.editMessageText(text, Markup.inlineKeyboard([
+  await ctx.editMessageText(text, Markup.inlineKeyboard([[
     Markup.button.callback('📊 Show breakdown', `bd_show:${id}`),
-  ]));
+    Markup.button.callback('🗑️ Delete', `del_ask:${entry.mealId}`),
+  ]]));
   await ctx.answerCbQuery();
+});
+
+bot.action(/^del_ask:(.+)$/, async (ctx) => {
+  const mealId = ctx.match[1];
+  const msg = ctx.callbackQuery.message;
+  const originalText = msg && 'text' in msg && typeof msg.text === 'string' ? msg.text : '';
+  try {
+    await ctx.editMessageText(
+      `Delete this meal?\n\n${originalText}`,
+      Markup.inlineKeyboard([[
+        Markup.button.callback('✅ Yes, delete', `del_yes:${mealId}`),
+        Markup.button.callback('❌ Cancel', `del_no:${mealId}`),
+      ]]),
+    );
+  } catch (err) {
+    console.error('del_ask edit failed:', err);
+  }
+  await ctx.answerCbQuery();
+});
+
+bot.action(/^del_yes:(.+)$/, async (ctx) => {
+  const mealId = ctx.match[1];
+  try {
+    const userId = getOwnerUserId();
+    const deleted = await deleteMeal(userId, mealId);
+    if (!deleted) {
+      await ctx.answerCbQuery('Already deleted');
+      await ctx.editMessageText('Already deleted.');
+      return;
+    }
+    await ctx.editMessageText(`Deleted. (${deleted.calories} cal removed)`);
+    await ctx.answerCbQuery();
+  } catch (err) {
+    console.error('del_yes error:', err);
+    await ctx.answerCbQuery('Something went wrong');
+  }
+});
+
+bot.action(/^del_no:(.+)$/, async (ctx) => {
+  try {
+    await ctx.editMessageText('Cancelled.');
+  } catch (err) {
+    console.error('del_no edit failed:', err);
+  }
+  await ctx.answerCbQuery();
+});
+
+bot.command('undo', async (ctx) => {
+  try {
+    const userId = getOwnerUserId();
+    const latest = await getLatestMeal(userId);
+    if (!latest) {
+      await ctx.reply('Nothing to undo.');
+      return;
+    }
+    const deleted = await deleteMeal(userId, latest.id);
+    if (!deleted) {
+      await ctx.reply('Nothing to undo.');
+      return;
+    }
+    await ctx.reply(`Undone. Removed "${deleted.description}" (${deleted.calories} cal).`);
+  } catch (err) {
+    console.error('Undo error:', err);
+    await ctx.reply('Something went wrong.');
+  }
+});
+
+bot.command('recent', async (ctx) => {
+  try {
+    const userId = getOwnerUserId();
+    const meals = await getRecentMeals(userId, 10);
+    if (meals.length === 0) {
+      await ctx.reply('No meals logged yet.');
+      return;
+    }
+    for (const meal of meals) {
+      const time = formatRecentTime(meal.logged_at);
+      await ctx.reply(
+        `${time} — ${meal.description} (${meal.calories} cal)`,
+        Markup.inlineKeyboard([Markup.button.callback('🗑️ Delete', `del_ask:${meal.id}`)]),
+      );
+    }
+  } catch (err) {
+    console.error('Recent error:', err);
+    await ctx.reply('Something went wrong fetching recent meals.');
+  }
 });
 
 bot.on('text', async (ctx) => {
@@ -155,15 +258,21 @@ bot.on('text', async (ctx) => {
   try {
     const result = await chat(text);
     if (result.type === 'macros') {
-      await logMeal(text, result.macros, result.items, 'text');
+      const mealId = await logMeal(text, result.macros, result.items, 'text');
       if (result.items && result.items.length > 1) {
-        const id = storeBreakdown(result.items, result.macros, '');
+        const id = storeBreakdown(result.items, result.macros, '', mealId);
         await ctx.reply(
           `Logged! ${formatMacrosSummary(result.macros)}`,
-          Markup.inlineKeyboard([Markup.button.callback('📊 Show breakdown', `bd_show:${id}`)]),
+          Markup.inlineKeyboard([[
+            Markup.button.callback('📊 Show breakdown', `bd_show:${id}`),
+            Markup.button.callback('🗑️ Delete', `del_ask:${mealId}`),
+          ]]),
         );
       } else {
-        await ctx.reply(`Logged!\n\n${formatMacros(result.macros)}`);
+        await ctx.reply(
+          `Logged!\n\n${formatMacros(result.macros)}`,
+          Markup.inlineKeyboard([Markup.button.callback('🗑️ Delete', `del_ask:${mealId}`)]),
+        );
       }
     } else {
       await ctx.reply(result.message);
@@ -208,16 +317,22 @@ bot.on('photo', async (ctx) => {
       base64,
       contentType,
     );
-    await logMeal(caption, macros, items, 'photo');
+    const mealId = await logMeal(caption, macros, items, 'photo');
     const prefix = description ? `${description}\n\n` : '';
     if (items && items.length > 1) {
-      const id = storeBreakdown(items, macros, prefix);
+      const id = storeBreakdown(items, macros, prefix, mealId);
       await ctx.reply(
         `${prefix}Logged! ${formatMacrosSummary(macros)}`,
-        Markup.inlineKeyboard([Markup.button.callback('📊 Show breakdown', `bd_show:${id}`)]),
+        Markup.inlineKeyboard([[
+          Markup.button.callback('📊 Show breakdown', `bd_show:${id}`),
+          Markup.button.callback('🗑️ Delete', `del_ask:${mealId}`),
+        ]]),
       );
     } else {
-      await ctx.reply(`${prefix}Logged!\n\n${formatMacros(macros)}`);
+      await ctx.reply(
+        `${prefix}Logged!\n\n${formatMacros(macros)}`,
+        Markup.inlineKeyboard([Markup.button.callback('🗑️ Delete', `del_ask:${mealId}`)]),
+      );
     }
   } catch {
     await ctx.reply('Something went wrong processing your photo. Please try again.');

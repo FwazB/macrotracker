@@ -1,4 +1,4 @@
-import { and, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { db } from './db/client';
 import { meals, mealItems } from './db/schema';
 import { getOwnerUserId } from './db/seed-owner';
@@ -88,16 +88,28 @@ async function sumMealsInWindow(start: Date, end: Date): Promise<Macros> {
   };
 }
 
+export interface DeletedMealSummary {
+  description: string;
+  calories: number;
+}
+
+export interface RecentMeal {
+  id: string;
+  logged_at: Date;
+  description: string;
+  calories: number;
+}
+
 export async function logMeal(
   description: string,
   macros: Macros,
   items?: ItemBreakdown[],
   source: 'text' | 'photo' = 'text',
-): Promise<void> {
+): Promise<string> {
   const userId = getOwnerUserId();
   const now = new Date();
 
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const [meal] = await tx
       .insert(meals)
       .values({
@@ -127,7 +139,62 @@ export async function logMeal(
         })),
       );
     }
+
+    return meal.id;
   });
+}
+
+export async function deleteMeal(
+  userId: string,
+  mealId: string,
+): Promise<DeletedMealSummary | null> {
+  const [row] = await db
+    .select({ description: meals.description, calories: meals.calories })
+    .from(meals)
+    .where(and(eq(meals.id, mealId), eq(meals.user_id, userId)))
+    .limit(1);
+
+  if (!row) return null;
+
+  await db.delete(meals).where(and(eq(meals.id, mealId), eq(meals.user_id, userId)));
+
+  return { description: row.description, calories: Number(row.calories) };
+}
+
+export async function getLatestMeal(
+  userId: string,
+): Promise<(DeletedMealSummary & { id: string }) | null> {
+  const [row] = await db
+    .select({ id: meals.id, description: meals.description, calories: meals.calories })
+    .from(meals)
+    .where(eq(meals.user_id, userId))
+    .orderBy(desc(meals.logged_at))
+    .limit(1);
+
+  if (!row) return null;
+
+  return { id: row.id, description: row.description, calories: Number(row.calories) };
+}
+
+export async function getRecentMeals(userId: string, limit: number): Promise<RecentMeal[]> {
+  const rows = await db
+    .select({
+      id: meals.id,
+      logged_at: meals.logged_at,
+      description: meals.description,
+      calories: meals.calories,
+    })
+    .from(meals)
+    .where(eq(meals.user_id, userId))
+    .orderBy(desc(meals.logged_at))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    id: r.id,
+    logged_at: r.logged_at,
+    description: r.description,
+    calories: Number(r.calories),
+  }));
 }
 
 export async function getTodayTotals(): Promise<Macros> {
