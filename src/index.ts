@@ -89,13 +89,11 @@ function storeBreakdown(items: ItemBreakdown[], macros: Macros, prefix: string, 
 function formatRecentTime(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
-    hour: 'numeric',
-    minute: '2-digit',
     month: 'numeric',
     day: 'numeric',
   }).formatToParts(date);
   const get = (t: string): string => parts.find((p) => p.type === t)?.value ?? '';
-  return `${get('month')}/${get('day')} ${get('hour')}:${get('minute')} ${get('dayPeriod')}`;
+  return `${get('month')}/${get('day')}`;
 }
 
 bot.command('start', async (ctx) => {
