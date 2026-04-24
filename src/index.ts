@@ -2,8 +2,10 @@ import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
 import axios from 'axios';
 import { estimateMacros, chat } from './claudeClient';
-import { logMeal, getTodayTotals, getWeekTotals } from './sheetsClient';
+import { logMeal, getTodayTotals, getWeekTotals } from './mealsRepo';
 import { Macros, ItemBreakdown } from './types';
+import { runMigrations } from './db/migrate';
+import { seedOwner } from './db/seed-owner';
 
 const MAX_TEXT_LENGTH = 500;
 const MAX_PHOTO_SIZE = 5 * 1024 * 1024; // 5MB
@@ -153,7 +155,7 @@ bot.on('text', async (ctx) => {
   try {
     const result = await chat(text);
     if (result.type === 'macros') {
-      await logMeal(text, result.macros, result.items);
+      await logMeal(text, result.macros, result.items, 'text');
       if (result.items && result.items.length > 1) {
         const id = storeBreakdown(result.items, result.macros, '');
         await ctx.reply(
@@ -203,7 +205,7 @@ bot.on('photo', async (ctx) => {
       : 'Food photo';
 
     const { macros, items, description } = await estimateMacros(undefined, base64, contentType);
-    await logMeal(caption, macros, items);
+    await logMeal(caption, macros, items, 'photo');
     const prefix = description ? `${description}\n\n` : '';
     if (items && items.length > 1) {
       const id = storeBreakdown(items, macros, prefix);
@@ -219,11 +221,14 @@ bot.on('photo', async (ctx) => {
   }
 });
 
-bot.launch();
-console.log('Bot started');
-
-// Send startup notification independently (bot.telegram.sendMessage uses HTTP, doesn't need polling)
 (async () => {
+  await runMigrations();
+  await seedOwner();
+
+  bot.launch();
+  console.log('Bot started');
+
+  // Send startup notification independently
   try {
     console.log('Fetching today totals for startup notification...');
     const totals = await getTodayTotals();
@@ -239,7 +244,10 @@ console.log('Bot started');
   } catch (err) {
     console.error('Startup notification error:', err);
   }
-})();
+})().catch((err) => {
+  console.error('Startup failed:', err);
+  process.exit(1);
+});
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

@@ -6,19 +6,27 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "ts-node src/db/migrate.ts",
+    "db:push": "drizzle-kit push",
+    "import-sheet": "ts-node --project tsconfig.scripts.json scripts/importSheet.ts"
   },
   "keywords": [],
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
+    "@neondatabase/serverless": "^1.1.0",
     "axios": "^1.14.0",
     "dotenv": "^17.4.1",
-    "googleapis": "^171.4.0",
-    "telegraf": "^4.16.3"
+    "drizzle-orm": "^0.45.2",
+    "telegraf": "^4.16.3",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
+    "@types/ws": "^8.18.1",
+    "drizzle-kit": "^0.31.10",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.2"
   }
