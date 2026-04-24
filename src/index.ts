@@ -200,11 +200,14 @@ bot.on('photo', async (ctx) => {
     }
 
     const base64 = buffer.toString('base64');
-    const caption = ctx.message.caption
-      ? sanitizeText(ctx.message.caption)
-      : 'Food photo';
+    const userCaption = ctx.message.caption ? sanitizeText(ctx.message.caption) : '';
+    const caption = userCaption || 'Food photo';
 
-    const { macros, items, description } = await estimateMacros(undefined, base64, contentType);
+    const { macros, items, description } = await estimateMacros(
+      userCaption || undefined,
+      base64,
+      contentType,
+    );
     await logMeal(caption, macros, items, 'photo');
     const prefix = description ? `${description}\n\n` : '';
     if (items && items.length > 1) {

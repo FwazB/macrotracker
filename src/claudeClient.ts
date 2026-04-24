@@ -164,14 +164,14 @@ export async function estimateMacros(
       type: "image",
       source: { type: "base64", media_type: mediaType, data: imageBase64 },
     });
-    content.push({
-      type: "text",
-      text: text
-        ? sanitizeUserInput(appendProductReminders(text.slice(0, MAX_TEXT_LENGTH)))
-        : "Describe what food you see in 1-2 sentences, then estimate the macros. " +
-          "If this is a nutrition label, read every value carefully and use the exact numbers shown on the label. " +
-          "Format: first write your description, then on a new line the JSON object.",
-    });
+    const basePrompt =
+      "Describe what food you see in 1-2 sentences, then estimate the macros. " +
+      "If this is a nutrition label, read every value carefully and use the exact numbers shown on the label. " +
+      "Format: first write your description, then on a new line the JSON object.";
+    const promptText = text
+      ? `${basePrompt}\n\nThe user also sent this caption describing the food — treat it as authoritative context (e.g. exact quantity, brand, or what they actually ate if it differs from what's visible in the image):\n${sanitizeUserInput(appendProductReminders(text.slice(0, MAX_TEXT_LENGTH)))}`
+      : basePrompt;
+    content.push({ type: "text", text: promptText });
   } else if (text) {
     if (text.trim().length === 0) {
       throw new Error("Text input must not be empty");
