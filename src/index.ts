@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
 import axios from 'axios';
 import { estimateMacros, chat } from './claudeClient';
-import { logMeal, getTodayTotals, getWeekTotals, deleteMeal, getLatestMeal, getRecentMeals } from './mealsRepo';
+import { logMeal, getTodayTotals, getWeekTotals, deleteMeal, getLatestMeal, getRecentMeals, getTodayMeals } from './mealsRepo';
 import { Macros, ItemBreakdown } from './types';
 import { runMigrations } from './db/migrate';
 import { seedOwner, getOwnerUserId } from './db/seed-owner';
@@ -112,9 +112,33 @@ bot.command('start', async (ctx) => {
 bot.command('today', async (ctx) => {
   try {
     const totals = await getTodayTotals();
-    await ctx.reply(`Today's totals:\n\n${formatMacros(totals)}`);
+    await ctx.reply(
+      `Today's totals:\n\n${formatMacros(totals)}`,
+      Markup.inlineKeyboard([Markup.button.callback('🍽️ View meals', 'meals_today')]),
+    );
   } catch {
     await ctx.reply("Something went wrong fetching today's totals.");
+  }
+});
+
+bot.action('meals_today', async (ctx) => {
+  try {
+    const userId = getOwnerUserId();
+    const todayMeals = await getTodayMeals(userId);
+    await ctx.answerCbQuery();
+    if (todayMeals.length === 0) {
+      await ctx.reply('No meals logged today.');
+      return;
+    }
+    for (const meal of todayMeals) {
+      await ctx.reply(
+        `${meal.description} (${meal.calories} cal)`,
+        Markup.inlineKeyboard([Markup.button.callback('🗑️ Delete', `del_ask:${meal.id}`)]),
+      );
+    }
+  } catch (err) {
+    console.error('meals_today error:', err);
+    await ctx.answerCbQuery('Something went wrong');
   }
 });
 

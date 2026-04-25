@@ -202,6 +202,27 @@ export async function getTodayTotals(): Promise<Macros> {
   return sumMealsInWindow(start, end);
 }
 
+export async function getTodayMeals(userId: string): Promise<RecentMeal[]> {
+  const { start, end } = estDayBoundsUtc(todayEST());
+  const rows = await db
+    .select({
+      id: meals.id,
+      logged_at: meals.logged_at,
+      description: meals.description,
+      calories: meals.calories,
+    })
+    .from(meals)
+    .where(and(eq(meals.user_id, userId), gte(meals.logged_at, start), lt(meals.logged_at, end)))
+    .orderBy(desc(meals.logged_at));
+
+  return rows.map((r) => ({
+    id: r.id,
+    logged_at: r.logged_at,
+    description: r.description,
+    calories: Number(r.calories),
+  }));
+}
+
 export async function getWeekTotals(): Promise<Macros> {
   const { start, end } = getESTWeekBounds();
   return sumMealsInWindow(start, end);
