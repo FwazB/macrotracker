@@ -374,9 +374,10 @@ bot.on('photo', async (ctx) => {
     const totals = await getTodayTotals();
     console.log('Today totals:', JSON.stringify(totals));
     const message = `Bot restarted — here's today so far:\n\n${formatMacros(totals)}`;
+    const keyboard = Markup.inlineKeyboard([Markup.button.callback('🍽️ View meals', 'today_meals')]);
     for (const userId of allowedUserIds) {
       console.log(`Sending startup notification to ${userId}...`);
-      await bot.telegram.sendMessage(userId, message).catch((err) => {
+      await bot.telegram.sendMessage(userId, message, keyboard).catch((err) => {
         console.error(`Failed to send startup notification to ${userId}:`, err);
       });
     }
